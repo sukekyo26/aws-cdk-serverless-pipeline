@@ -15,7 +15,7 @@
     ]
   },
   "context": {
-    "existing_codecommit_repo_name": null,
+    "existing_codecommit_repository_name": null,
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [

@@ -19,8 +19,8 @@ class GenerateChalicePipelineStack(Stack):
         scope: Construct,
         construct_id: str,
         *,
-        repository_name: str,
-        existing_codecommit_repo_name: Optional[str] = None,
+        application_name: str,
+        existing_codecommit_repository_name: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -28,18 +28,18 @@ class GenerateChalicePipelineStack(Stack):
         #############################################################
         # CodeCommit
         #############################################################
-        if existing_codecommit_repo_name:
+        if existing_codecommit_repository_name:
             source_repository = codecommit.Repository.from_repository_name(
                 self,
                 "SourceRepository",
-                repository_name=existing_codecommit_repo_name
+                repository_name=existing_codecommit_repository_name
             )
         else:
             source_repository = codecommit.Repository(
                 self,
                 "SourceRepository",
-                repository_name=repository_name,
-                description=f"Source code for {repository_name}",
+                repository_name=application_name,
+                description=f"Source code for {application_name}",
             )
 
         #############################################################
@@ -72,7 +72,7 @@ class GenerateChalicePipelineStack(Stack):
         app_package_build = codebuild.PipelineProject(
             self,
             "AppPackageBuild",
-            project_name=f"{repository_name}Build",
+            project_name=f"{application_name}Build",
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.from_docker_registry("aws/codebuild/amazonlinux2-x86_64-standard:5.0"),
                 compute_type=codebuild.ComputeType.SMALL,
@@ -175,7 +175,7 @@ class GenerateChalicePipelineStack(Stack):
         codepipeline.Pipeline(
             self,
             "AppPipeline",
-            pipeline_name=f"{repository_name}Pipeline",
+            pipeline_name=f"{application_name}Pipeline",
             artifact_bucket=artifact_bucket_store,
             role=code_pipeline_role,
             pipeline_type=codepipeline.PipelineType.V2,
@@ -216,8 +216,8 @@ class GenerateChalicePipelineStack(Stack):
                     actions=[
                         codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
                             action_name="CreateBetaChangeSet",
-                            stack_name=f"{repository_name}BetaStack",
-                            change_set_name=f"{repository_name}ChangeSet",
+                            stack_name=f"{application_name}BetaStack",
+                            change_set_name=f"{application_name}ChangeSet",
                             admin_permissions=True,
                             template_path=build_output.at_path("transformed.yaml"),
                             run_order=1,
@@ -225,8 +225,8 @@ class GenerateChalicePipelineStack(Stack):
                         ),
                         codepipeline_actions.CloudFormationExecuteChangeSetAction(
                             action_name="ExecuteChangeSet",
-                            stack_name=f"{repository_name}BetaStack",
-                            change_set_name=f"{repository_name}ChangeSet",
+                            stack_name=f"{application_name}BetaStack",
+                            change_set_name=f"{application_name}ChangeSet",
                             run_order=2,
                             output=codepipeline.Artifact("AppDeploymentValues"),
                         )
