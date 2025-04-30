@@ -5,26 +5,15 @@ from generate_chalice_pipeline.generate_chalice_pipeline_stack import GenerateCh
 
 def test_s3_application_bucket_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
-    print(template.to_json())
     template.resource_count_is("AWS::S3::Bucket", 2)  # ApplicationBucket and ArtifactBucketStore
-
-
-def test_codecommit_repository_created():
-    app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
-    template = assertions.Template.from_stack(stack)
-
-    template.has_resource_properties("AWS::CodeCommit::Repository", {
-        "RepositoryName": "TestRepo"
-    })
 
 
 def test_artifact_bucket_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.resource_count_is("AWS::S3::Bucket", 2)  # ApplicationBucket and ArtifactBucketStore
@@ -35,9 +24,21 @@ def test_artifact_bucket_created():
     })
 
 
+def test_codecommit_repository_created():
+    app = core.App()
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
+    template = assertions.Template.from_stack(stack)
+
+    template.has_resource_properties("AWS::CodeCommit::Repository", {
+        "RepositoryName": {
+            "Ref": "ApplicationName"
+        }
+    })
+
+
 def test_codebuild_role_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_resource_properties("AWS::IAM::Role", {
@@ -58,11 +59,10 @@ def test_codebuild_role_created():
 
 def test_codebuild_project_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_resource_properties("AWS::CodeBuild::Project", {
-        "Name": "TestRepoBuild",
         "Environment": {
             "ComputeType": "BUILD_GENERAL1_SMALL",
             "Image": "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
@@ -77,7 +77,7 @@ def test_codebuild_project_created():
 
 def test_codepipeline_role_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_resource_properties("AWS::IAM::Role", {
@@ -98,7 +98,7 @@ def test_codepipeline_role_created():
 
 def test_cfn_deploy_role_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_resource_properties("AWS::IAM::Role", {
@@ -119,11 +119,10 @@ def test_cfn_deploy_role_created():
 
 def test_pipeline_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_resource_properties("AWS::CodePipeline::Pipeline", {
-        "Name": "TestRepoPipeline",
         "PipelineType": "V2",
         "Stages": assertions.Match.array_with([
             assertions.Match.object_like({"Name": "Source"}),
@@ -136,7 +135,7 @@ def test_pipeline_created():
 
 def test_cloudformation_outputs_created():
     app = core.App()
-    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline", repository_name="TestRepo")
+    stack = GenerateChalicePipelineStack(app, "generate-chalice-pipeline")
     template = assertions.Template.from_stack(stack)
 
     template.has_output("SourceRepoURL", {})

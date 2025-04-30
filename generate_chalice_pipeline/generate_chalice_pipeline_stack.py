@@ -2,6 +2,7 @@ from typing import Optional
 
 from aws_cdk import (
     CfnOutput,
+    CfnParameter,
     Stack,
     aws_iam as iam,
     aws_s3 as s3,
@@ -19,11 +20,22 @@ class GenerateChalicePipelineStack(Stack):
         scope: Construct,
         construct_id: str,
         *,
-        application_name: str,
         existing_codecommit_repository_name: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        #############################################################
+        # Parameters
+        #############################################################
+        application_name_param = CfnParameter(
+            self,
+            "ApplicationName",
+            type="String",
+            description="The name of the Chalice application",
+        )
+
+        application_name = application_name_param.value_as_string
 
         #############################################################
         # CodeCommit

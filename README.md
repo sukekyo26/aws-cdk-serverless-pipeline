@@ -26,17 +26,37 @@ The following CDK commands are available:
 - `cdk diff`: Compares the deployed stack with the current state.
 - `cdk destroy`: Deletes the stack.
 
+### Context Values
+
+When deploying the stack, you can specify the following context values:
+
+- `existingCodeCommitRepositoryName`: (Optional) If you already have a CodeCommit repository, specify its name here. Otherwise, a new repository will be created.
+
+You can define these values in the `cdk.json` file or pass them as `--context` or `-c` options during deployment.
+
+#### Example `cdk.json`
+
+```json
+{
+  "app": "python3 app.py",
+  "context": {
+    "existingCodeCommitRepositoryName": "MyExistingRepo"
+  }
+}
+```
+
 ### Parameters
 
 When deploying the stack, you can specify the following parameters:
 
-- `application_name`: The name of your Chalice application. This will be used to name resources like the CodeCommit repository or CodePipeline.
-- `existing_codecommit_repository_name`: (Optional) If you already have a CodeCommit repository, specify its name here. Otherwise, a new repository will be created.
+- `ApplicationName`: The name of your Chalice application. This will be used to name resources like the CodeCommit repository or CodePipeline.
 
-Example deployment command:
+You can pass them as `--parameters` options during deployment.
+
+### Example Deployment Command
 
 ```bash
-$ cdk deploy --parameters application_name=MyChaliceApp --parameters existing_codecommit_repository_name=MyExistingRepo
+$ cdk deploy --parameters ApplicationName=MyChaliceApp --context existingCodeCommitRepositoryName=MyExistingRepo
 ```
 
 ## Useful Commands
