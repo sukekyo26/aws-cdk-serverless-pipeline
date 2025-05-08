@@ -8,11 +8,13 @@ from generate_chalice_pipeline.generate_chalice_pipeline_stack import GenerateCh
 app = cdk.App()
 
 existing_repo_name = app.node.try_get_context("existingCodeCommitRepositoryName")
+stack_name = app.node.try_get_context("stackName")
 
 GenerateChalicePipelineStack(
     app,
     "GenerateChalicePipelineStack",
-    existing_codecommit_repository_name=existing_repo_name
+    stack_name=stack_name,
+    existing_codecommit_repository_name=existing_repo_name,
 )
 
 app.synth()
