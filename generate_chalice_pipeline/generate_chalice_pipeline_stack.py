@@ -86,15 +86,12 @@ class GenerateChalicePipelineStack(Stack):
             "AppPackageBuild",
             project_name=f"{application_name}Build",
             environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.from_docker_registry("aws/codebuild/amazonlinux2-x86_64-standard:5.0"),
+                build_image=codebuild.LinuxBuildImage.AMAZON_LINUX_2_5,
                 compute_type=codebuild.ComputeType.SMALL,
                 environment_variables={
-                    "APP_S3_BUCKET": {"value": application_bucket.bucket_name}
+                    "APP_S3_BUCKET": codebuild.BuildEnvironmentVariable(value=application_bucket.bucket_name)
                 },
             ),
-            environment_variables={
-                "APP_S3_BUCKET": {"value": application_bucket.bucket_name}
-            },
             role=code_build_role,
             build_spec=codebuild.BuildSpec.from_source_filename("buildspec.yml"),
         )
