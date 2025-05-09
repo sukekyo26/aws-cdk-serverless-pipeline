@@ -177,6 +177,12 @@ class GenerateChalicePipelineStack(Stack):
                 )
             },
         )
+        cfn_deploy_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                principals=[iam.ArnPrincipal(code_pipeline_role.role_arn)],
+            )
+        )
 
         source_output = codepipeline.Artifact("SourceRepo")
         build_output = codepipeline.Artifact("CompiledCFNTemplate")
