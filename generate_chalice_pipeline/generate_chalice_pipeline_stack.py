@@ -15,11 +15,14 @@ from constructs import Construct
 
 
 class GenerateChalicePipelineStack(Stack):
+    BRUNCH_MAPPING = {"dev": "develop", "stg": "develop", "prd": "main"}
+
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
         *,
+        environment: str,
         existing_codecommit_repository_name: Optional[str] = None,
         **kwargs,
     ) -> None:
@@ -89,6 +92,7 @@ class GenerateChalicePipelineStack(Stack):
                 build_image=codebuild.LinuxBuildImage.AMAZON_LINUX_2_5,
                 compute_type=codebuild.ComputeType.SMALL,
                 environment_variables={
+                    "ENV": codebuild.BuildEnvironmentVariable(value=environment),
                     "APP_S3_BUCKET": codebuild.BuildEnvironmentVariable(value=application_bucket.bucket_name)
                 },
             ),
@@ -187,68 +191,72 @@ class GenerateChalicePipelineStack(Stack):
         source_output = codepipeline.Artifact("SourceRepo")
         build_output = codepipeline.Artifact("CompiledCFNTemplate")
 
-        codepipeline.Pipeline(
+        app_pipeline = codepipeline.Pipeline(
             self,
             "AppPipeline",
             pipeline_name=f"{application_name}Pipeline",
             artifact_bucket=artifact_bucket_store,
             role=code_pipeline_role,
             pipeline_type=codepipeline.PipelineType.V2,
-            stages=[
-                codepipeline.StageProps(
-                    stage_name="Source",
-                    actions=[
-                        codepipeline_actions.CodeCommitSourceAction(
-                            action_name="Source",
-                            repository=source_repository,
-                            branch="master",
-                            output=source_output,
-                        )
-                    ],
-                ),
-                codepipeline.StageProps(
-                    stage_name="Build",
-                    actions=[
-                        codepipeline_actions.CodeBuildAction(
-                            action_name="CodeBuild",
-                            project=app_package_build,
-                            input=source_output,
-                            outputs=[build_output],
-                        )
-                    ],
-                ),
-                codepipeline.StageProps(
-                    stage_name="Approval",
-                    actions=[
-                        codepipeline_actions.ManualApprovalAction(
-                            action_name="ManualApproval",
-                            additional_information="Please review the build artifacts before deploying.",
-                        )
-                    ],
-                ),
-                codepipeline.StageProps(
-                    stage_name="Deploy",
-                    actions=[
-                        codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
-                            action_name="CreateBetaChangeSet",
-                            stack_name=f"{application_name}BetaStack",
-                            change_set_name=f"{application_name}ChangeSet",
-                            admin_permissions=True,
-                            template_path=build_output.at_path("transformed.yaml"),
-                            run_order=1,
-                            role=cfn_deploy_role,
-                        ),
-                        codepipeline_actions.CloudFormationExecuteChangeSetAction(
-                            action_name="ExecuteChangeSet",
-                            stack_name=f"{application_name}BetaStack",
-                            change_set_name=f"{application_name}ChangeSet",
-                            run_order=2,
-                            output=codepipeline.Artifact("AppDeploymentValues"),
-                        )
-                    ],
-                ),
+        )
+
+        app_pipeline.add_stage(
+            stage_name="Source",
+            actions=[
+                codepipeline_actions.CodeCommitSourceAction(
+                    action_name="Source",
+                    repository=source_repository,
+                    branch=self.BRUNCH_MAPPING[environment],
+                    output=source_output,
+                )
             ],
         )
+
+        app_pipeline.add_stage(
+            stage_name="Build",
+            actions=[
+                codepipeline_actions.CodeBuildAction(
+                    action_name="CodeBuild",
+                    project=app_package_build,
+                    input=source_output,
+                    outputs=[build_output],
+                )
+            ],
+        )
+
+        if environment in ["stg", "prd"]:
+            app_pipeline.add_stage(
+                stage_name="Approval",
+                actions=[
+                    codepipeline_actions.ManualApprovalAction(
+                        action_name="ManualApproval",
+                        additional_information="Please review the build artifacts before deploying.",
+                    )
+                ],
+            )
+
+        app_pipeline.add_stage(
+            stage_name="Deploy",
+            actions=[
+                codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
+                    action_name="CreateBetaChangeSet",
+                    stack_name=f"{application_name}BetaStack",
+                    change_set_name=f"{application_name}ChangeSet",
+                    admin_permissions=True,
+                    template_path=build_output.at_path("transformed.yaml"),
+                    run_order=1,
+                    role=cfn_deploy_role,
+                ),
+                codepipeline_actions.CloudFormationExecuteChangeSetAction(
+                    action_name="ExecuteChangeSet",
+                    stack_name=f"{application_name}BetaStack",
+                    change_set_name=f"{application_name}ChangeSet",
+                    run_order=2,
+                    output=codepipeline.Artifact("AppDeploymentValues"),
+                )
+            ],
+        )
+
 
         #############################################################
         # CloudFormation Outputs
