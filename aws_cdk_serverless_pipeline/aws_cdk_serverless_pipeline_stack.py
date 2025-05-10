@@ -1,5 +1,3 @@
-from typing import Optional
-
 from aws_cdk import (
     CfnOutput,
     CfnParameter,
@@ -15,15 +13,13 @@ from constructs import Construct
 
 
 class AwsCdkServerlessPipelineStack(Stack):
-    BRUNCH_MAPPING = {"dev": "develop", "stg": "develop", "prd": "main"}
-
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
         *,
-        environment: str,
-        existing_codecommit_repository_name: Optional[str] = None,
+        environment: str, # environment name (dev, stg, prd)
+        source_type: str, # source code repository type (github or codecommit)
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -37,24 +33,60 @@ class AwsCdkServerlessPipelineStack(Stack):
             type="String",
             description="The name of the serverless application",
         )
+        repository_name_param = CfnParameter(
+            self,
+            "RepositoryName",
+            type="String",
+            description="The name of source code repository codecommit or github",
+        )
+        branch_name_param = CfnParameter(
+            self,
+            "BranchName",
+            type="String",
+            description="The name of repository branch",
+        )
+        github_owner_param = CfnParameter(
+            self,
+            "GithubOwner",
+            type="String",
+            description="The name of github repository owner",
+        )
+        github_connection_arn_param = CfnParameter(
+            self,
+            "GithubConnectionArn",
+            type="String",
+            description="The name of connection arn of github",
+        )
 
         application_name = application_name_param.value_as_string
+        repository_name = repository_name_param.value_as_string
+        branch_name = branch_name_param.value_as_string
+        github_owner_name = github_owner_param.value_as_string
+        github_connection_arn_name = github_connection_arn_param.value_as_string
 
         #############################################################
-        # CodeCommit
+        # Source
         #############################################################
-        if existing_codecommit_repository_name:
-            source_repository = codecommit.Repository.from_repository_name(
-                self,
-                "SourceRepository",
-                repository_name=existing_codecommit_repository_name
+        source_output = codepipeline.Artifact("SourceRepo")
+        if source_type == "github":
+            source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
+                action_name="GitHubSource",
+                owner=github_owner_name,
+                repo=repository_name,
+                branch=branch_name,
+                connection_arn=github_connection_arn_name,
+                output=source_output,
             )
-        else:
-            source_repository = codecommit.Repository(
-                self,
-                "SourceRepository",
-                repository_name=application_name,
-                description=f"Source code for {application_name}",
+        elif source_type == "codecommit":
+            source_action = codepipeline_actions.CodeCommitSourceAction(
+                action_name="CodeCommitSource",
+                repository=codecommit.Repository.from_repository_name(
+                    self,
+                    "SourceRepository",
+                    repository_name=repository_name
+                ),
+                branch=branch_name,
+                output=source_output,
             )
 
         #############################################################
@@ -105,63 +137,69 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         artifact_bucket_store = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
 
+        code_pipeline_policy_statments = [
+            iam.PolicyStatement(
+                actions=[
+                    "s3:GetObject",
+                    "s3:GetObjectVersion",
+                    "s3:GetBucketVersioning",
+                    "s3:CreateBucket",
+                    "s3:PutObject",
+                    "s3:PutBucketVersioning",
+                ],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["cloudwatch:*", "iam:PassRole"],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["lambda:InvokeFunction", "lambda:ListFunctions"],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=[
+                    "cloudformation:CreateStack",
+                    "cloudformation:DeleteStack",
+                    "cloudformation:DescribeStacks",
+                    "cloudformation:UpdateStack",
+                    "cloudformation:CreateChangeSet",
+                    "cloudformation:DeleteChangeSet",
+                    "cloudformation:DescribeChangeSet",
+                    "cloudformation:ExecuteChangeSet",
+                    "cloudformation:SetStackPolicy",
+                    "cloudformation:ValidateTemplate",
+                    "iam:PassRole",
+                ],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["codebuild:BatchGetBuilds", "codebuild:StartBuild"],
+                resources=["*"],
+            ),
+        ]
+
+        if source_type == "codecommit":
+            code_pipeline_policy_statments.append(
+                iam.PolicyStatement(
+                    actions=[
+                        "codecommit:CancelUploadArchive",
+                        "codecommit:GetBranch",
+                        "codecommit:GetCommit",
+                        "codecommit:GetUploadArchiveStatus",
+                        "codecommit:UploadArchive",
+                    ],
+                    resources=["*"],
+                ),
+            )
+
         code_pipeline_role = iam.Role(
             self,
             "CodePipelineRole",
             assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
             inline_policies={
                 "DefaultPolicy": iam.PolicyDocument(
-                    statements=[
-                        iam.PolicyStatement(
-                            actions=[
-                                "s3:GetObject",
-                                "s3:GetObjectVersion",
-                                "s3:GetBucketVersioning",
-                                "s3:CreateBucket",
-                                "s3:PutObject",
-                                "s3:PutBucketVersioning",
-                            ],
-                            resources=["*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=[
-                                "codecommit:CancelUploadArchive",
-                                "codecommit:GetBranch",
-                                "codecommit:GetCommit",
-                                "codecommit:GetUploadArchiveStatus",
-                                "codecommit:UploadArchive",
-                            ],
-                            resources=["*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=["cloudwatch:*", "iam:PassRole"],
-                            resources=["*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=["lambda:InvokeFunction", "lambda:ListFunctions"],
-                            resources=["*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=[
-                                "cloudformation:CreateStack",
-                                "cloudformation:DeleteStack",
-                                "cloudformation:DescribeStacks",
-                                "cloudformation:UpdateStack",
-                                "cloudformation:CreateChangeSet",
-                                "cloudformation:DeleteChangeSet",
-                                "cloudformation:DescribeChangeSet",
-                                "cloudformation:ExecuteChangeSet",
-                                "cloudformation:SetStackPolicy",
-                                "cloudformation:ValidateTemplate",
-                                "iam:PassRole",
-                            ],
-                            resources=["*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=["codebuild:BatchGetBuilds", "codebuild:StartBuild"],
-                            resources=["*"],
-                        ),
-                    ]
+                    statements=code_pipeline_policy_statments
                 )
             },
         )
@@ -188,7 +226,6 @@ class AwsCdkServerlessPipelineStack(Stack):
             )
         )
 
-        source_output = codepipeline.Artifact("SourceRepo")
         build_output = codepipeline.Artifact("CompiledCFNTemplate")
 
         app_pipeline = codepipeline.Pipeline(
@@ -202,14 +239,7 @@ class AwsCdkServerlessPipelineStack(Stack):
 
         app_pipeline.add_stage(
             stage_name="Source",
-            actions=[
-                codepipeline_actions.CodeCommitSourceAction(
-                    action_name="Source",
-                    repository=source_repository,
-                    branch=self.BRUNCH_MAPPING[environment],
-                    output=source_output,
-                )
-            ],
+            actions=[source_action],
         )
 
         app_pipeline.add_stage(
@@ -261,7 +291,6 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         # CloudFormation Outputs
         #############################################################
-        CfnOutput(self, "SourceRepoURL", value=source_repository.repository_clone_url_http)
         CfnOutput(self, "S3ApplicationBucket", value=application_bucket.bucket_name)
         CfnOutput(self, "CodeBuildRoleArn", value=code_build_role.role_arn)
         CfnOutput(self, "S3PipelineBucket", value=artifact_bucket_store.bucket_name)
