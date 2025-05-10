@@ -16,7 +16,7 @@
   },
   "context": {
     "environment": "dev",
-    "stackName": "GenerateChalicePipelineStack",
+    "stackName": "AwsCdkServerlessPipelineStack",
     "existingCodeCommitRepositoryName": null,
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,

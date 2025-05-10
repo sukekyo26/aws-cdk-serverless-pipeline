@@ -2,7 +2,7 @@
 
 import aws_cdk as cdk
 
-from generate_chalice_pipeline.generate_chalice_pipeline_stack import GenerateChalicePipelineStack
+from aws_cdk_serverless_pipeline.aws_cdk_serverless_pipeline_stack import AwsCdkServerlessPipelineStack
 
 
 app = cdk.App()
@@ -18,9 +18,9 @@ if environment not in ALLOWED_ENVIRONMENTS:
         f"Invalid environment '{environment}'. Allowed values are: {', '.join(ALLOWED_ENVIRONMENTS)}"
     )
 
-GenerateChalicePipelineStack(
+AwsCdkServerlessPipelineStack(
     app,
-    "GenerateChalicePipelineStack",
+    "AwsCdkServerlessPipelineStack",
     stack_name=stack_name,
     environment=environment,
     existing_codecommit_repository_name=existing_repo_name,

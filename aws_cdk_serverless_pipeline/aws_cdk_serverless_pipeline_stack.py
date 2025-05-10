@@ -14,7 +14,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class GenerateChalicePipelineStack(Stack):
+class AwsCdkServerlessPipelineStack(Stack):
     BRUNCH_MAPPING = {"dev": "develop", "stg": "develop", "prd": "main"}
 
     def __init__(
@@ -35,7 +35,7 @@ class GenerateChalicePipelineStack(Stack):
             self,
             "ApplicationName",
             type="String",
-            description="The name of the Chalice application",
+            description="The name of the serverless application",
         )
 
         application_name = application_name_param.value_as_string
