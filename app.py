@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import re
+
 import aws_cdk as cdk
 
 from aws_cdk_serverless_pipeline.aws_cdk_serverless_pipeline_stack import AwsCdkServerlessPipelineStack
@@ -7,17 +9,22 @@ from aws_cdk_serverless_pipeline.aws_cdk_serverless_pipeline_stack import AwsCdk
 
 ALLOWED_ENVIRONMENTS = ["dev", "stg", "prd"]
 ALLOWED_SOURCE_TYPES = ["github", "codecommit"]
+PASCAL_CASE_PATTERN = r'^[A-Z][a-zA-Z0-9]*$'
 
 app = cdk.App()
 
-stack_name = app.node.try_get_context("stackName")
+# Application name for use as the name of cloudformation stack ,codebuild, and codepipeline
+# Enter in Pascal case.
+application_name = app.node.try_get_context("applicationName")
+# Use as environment variable `ENV` for codebuild: `dev` or `stg` or `prd`
 environment = app.node.try_get_context("environment")
+# Source Repository type: `github` or `codecommit``
 source_type = app.node.try_get_context("sourceType")
 
 # Validation context
 missing_contexts = []
 
-if not stack_name:
+if not application_name:
     missing_contexts.append("stackName")
 if not environment:
     missing_contexts.append("environment")
@@ -30,11 +37,13 @@ if missing_contexts:
         "Please provide them using the '-c <key>=<value>' option."
     )
 
-if environment not in ALLOWED_ENVIRONMENTS:
+# check Application name is pascal case
+if not re.match(PASCAL_CASE_PATTERN, application_name):
     raise ValueError(
-        f"Invalid environment '{environment}'. Allowed values are: {', '.join(ALLOWED_ENVIRONMENTS)}"
+        f"The application name '{application_name}' is invalid. It must be in PascalCase format."
     )
 
+# check Source type is `github` or `codecommit`
 if source_type not in ALLOWED_SOURCE_TYPES:
     raise ValueError(
         f"Invalid source type '{source_type}'. Allowed values are: {', '.join(ALLOWED_SOURCE_TYPES)}"
@@ -43,7 +52,8 @@ if source_type not in ALLOWED_SOURCE_TYPES:
 AwsCdkServerlessPipelineStack(
     app,
     "AwsCdkServerlessPipelineStack",
-    stack_name=stack_name,
+    stack_name=f"{application_name}Stack",
+    application_name=application_name,
     environment=environment,
     source_type=source_type,
 )

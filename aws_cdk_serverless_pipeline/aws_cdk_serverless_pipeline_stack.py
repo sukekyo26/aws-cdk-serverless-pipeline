@@ -18,6 +18,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         scope: Construct,
         construct_id: str,
         *,
+        application_name: str,
         environment: str, # environment name (dev, stg, prd)
         source_type: str, # source code repository type (github or codecommit)
         **kwargs,
@@ -27,12 +28,6 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         # Parameters
         #############################################################
-        application_name_param = CfnParameter(
-            self,
-            "ApplicationName",
-            type="String",
-            description="The name of the serverless application",
-        )
         repository_name_param = CfnParameter(
             self,
             "RepositoryName",
@@ -58,7 +53,6 @@ class AwsCdkServerlessPipelineStack(Stack):
             description="The name of connection arn of github",
         )
 
-        application_name = application_name_param.value_as_string
         repository_name = repository_name_param.value_as_string
         branch_name = branch_name_param.value_as_string
         github_owner_name = github_owner_param.value_as_string
