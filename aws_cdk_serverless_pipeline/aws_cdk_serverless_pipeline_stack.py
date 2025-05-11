@@ -63,7 +63,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         source_output = codepipeline.Artifact("SourceRepo")
         if source_type == "github":
-            source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
+            codepipeline_source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
                 action_name="GitHubSource",
                 owner=github_owner_name,
                 repo=repository_name,
@@ -72,7 +72,10 @@ class AwsCdkServerlessPipelineStack(Stack):
                 output=source_output,
             )
         elif source_type == "codecommit":
-            source_action = codepipeline_actions.CodeCommitSourceAction(
+            codepipeline_source_action_role: iam.Role = self._generate_codepipeline_source_action_role(
+                repository_name=repository_name
+            )
+            codepipeline_source_action = codepipeline_actions.CodeCommitSourceAction(
                 action_name="CodeCommitSource",
                 repository=codecommit.Repository.from_repository_name(
                     self,
@@ -81,56 +84,234 @@ class AwsCdkServerlessPipelineStack(Stack):
                 ),
                 branch=branch_name,
                 output=source_output,
+                role=codepipeline_source_action_role
             )
 
         #############################################################
         # CodeBuild
         #############################################################
+        codebuild_project_name = f"{application_name}Build"
         application_bucket = s3.Bucket(self, "ApplicationBucket")
+        build_output = codepipeline.Artifact("CompiledCFNTemplate")
 
-        code_build_role = iam.Role(
-            self,
-            "CodeBuildRole",
-            assumed_by=iam.ServicePrincipal("codebuild.amazonaws.com"),
+        codebuild_role: iam.Role = self._generate_codebuild_role(
+            codebuild_project_name=codebuild_project_name,
+            application_bucket=application_bucket
         )
-        code_build_policy = iam.Policy(
-            self,
-            "CodeBuildPolicy",
-            policy_name="CodeBuildPolicy",
-            statements=[
-                iam.PolicyStatement(
-                    actions=["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-                    resources=["*"],
-                ),
-                iam.PolicyStatement(
-                    actions=["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
-                    resources=["arn:*:s3:::*"],
-                ),
-            ],
+        codepipeline_build_action_role: iam.Role = self._generate_codepipeline_build_action_role(
+            codebuild_project_name=codebuild_project_name
         )
-        code_build_policy.attach_to_role(code_build_role)
 
-        app_package_build = codebuild.PipelineProject(
-            self,
-            "AppPackageBuild",
-            project_name=f"{application_name}Build",
-            environment=codebuild.BuildEnvironment(
-                build_image=codebuild.LinuxBuildImage.AMAZON_LINUX_2_5,
-                compute_type=codebuild.ComputeType.SMALL,
-                environment_variables={
-                    "ENV": codebuild.BuildEnvironmentVariable(value=environment),
-                    "APP_S3_BUCKET": codebuild.BuildEnvironmentVariable(value=application_bucket.bucket_name)
-                },
+        codepipeline_build_action = codepipeline_actions.CodeBuildAction(
+            action_name="CodeBuild",
+            project=codebuild.PipelineProject(
+                self,
+                "AppPackageBuild",
+                project_name=codebuild_project_name,
+                environment=codebuild.BuildEnvironment(
+                    build_image=codebuild.LinuxBuildImage.AMAZON_LINUX_2_5,
+                    compute_type=codebuild.ComputeType.SMALL,
+                    environment_variables={
+                        "ENV": codebuild.BuildEnvironmentVariable(value=environment),
+                        "APP_S3_BUCKET": codebuild.BuildEnvironmentVariable(value=application_bucket.bucket_name)
+                    },
+                ),
+                role=codebuild_role,
+                build_spec=codebuild.BuildSpec.from_source_filename("buildspec.yml"),
             ),
-            role=code_build_role,
-            build_spec=codebuild.BuildSpec.from_source_filename("buildspec.yml"),
+            input=source_output,
+            outputs=[build_output],
+            role=codepipeline_build_action_role
+        )
+
+        #############################################################
+        # Approval only stg and prd
+        #############################################################
+        if environment in ["stg", "prd"]:
+            codepipeline_manual_approval_action = codepipeline_actions.ManualApprovalAction(
+                action_name="ManualApproval",
+                additional_information="Please review the build artifacts before deploying.",
+            )
+
+        #############################################################
+        # CfnDeploy
+        #############################################################
+        codepipeline_cfn_deploy_action_role: iam.Role = self._generate_codepipeline_cfn_deploy_action_role()
+
+        codepipeline_cloudformation_create_replace_change_set_action = codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
+            action_name="CreateBetaChangeSet",
+            stack_name=f"{application_name}BetaStack",
+            change_set_name=f"{application_name}ChangeSet",
+            admin_permissions=True,
+            template_path=build_output.at_path("transformed.yaml"),
+            run_order=1,
+            role=codepipeline_cfn_deploy_action_role,
+        )
+
+        codepipeline_cloudformation_execute_change_set_action = codepipeline_actions.CloudFormationExecuteChangeSetAction(
+            action_name="ExecuteChangeSet",
+            stack_name=f"{application_name}BetaStack",
+            change_set_name=f"{application_name}ChangeSet",
+            run_order=2,
+            output=codepipeline.Artifact("AppDeploymentValues"),
         )
 
         #############################################################
         # CodePipeline
         #############################################################
-        artifact_bucket_store = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
+        codepipeline_project_name = f"{application_name}Pipeline"
+        artifact_bucket = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
 
+        codepipeline_role: iam.Role = self._generate_codepipeline_role(
+            repository_name=repository_name,
+            codepipeline_project_name=codepipeline_project_name,
+            artifact_bucket=artifact_bucket,
+        )
+
+        if source_type == "codecommit":
+            codepipeline_source_action_role.assume_role_policy.add_statements(
+                iam.PolicyStatement(
+                    actions=["sts:AssumeRole"],
+                    principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
+                )
+            )
+
+        codepipeline_build_action_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
+            )
+        )
+
+        codepipeline_cfn_deploy_action_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
+            )
+        )
+
+        codepipeline_project = codepipeline.Pipeline(
+            self,
+            "AppPipeline",
+            pipeline_name=codepipeline_project_name,
+            artifact_bucket=artifact_bucket,
+            role=codepipeline_role,
+            pipeline_type=codepipeline.PipelineType.V2,
+        )
+
+        codepipeline_project.add_stage(
+            stage_name="Source",
+            actions=[codepipeline_source_action],
+        )
+
+        codepipeline_project.add_stage(
+            stage_name="Build",
+            actions=[codepipeline_build_action],
+        )
+
+        if environment in ["stg", "prd"]:
+            codepipeline_project.add_stage(
+                stage_name="Approval",
+                actions=[codepipeline_manual_approval_action],
+            )
+
+        codepipeline_project.add_stage(
+            stage_name="CfnDeploy",
+            actions=[
+                codepipeline_cloudformation_create_replace_change_set_action,
+                codepipeline_cloudformation_execute_change_set_action
+            ],
+        )
+
+
+        #############################################################
+        # CloudFormation Outputs
+        #############################################################
+        CfnOutput(self, "S3ApplicationBucket", value=application_bucket.bucket_name)
+        CfnOutput(self, "CodeBuildRoleArn", value=codebuild_role.role_arn)
+        CfnOutput(self, "S3PipelineBucket", value=artifact_bucket.bucket_name)
+        CfnOutput(self, "CodePipelineRoleArn", value=codepipeline_role.role_arn)
+        CfnOutput(self, "CFNDeployRoleArn", value=codepipeline_cfn_deploy_action_role.role_arn)
+
+
+    def _generate_codebuild_role(
+        self,
+        codebuild_project_name: str,
+        application_bucket: s3.Bucket
+    ) -> iam.Role:
+        codebuild_role = iam.Role(
+            self,
+            "CodeBuildRole",
+            assumed_by=iam.ServicePrincipal("codebuild.amazonaws.com"),
+        )
+        codebuild_policy = iam.Policy(
+            self,
+            "CodeBuildPolicy",
+            policy_name="CodeBuildPolicy",
+            statements=[
+                iam.PolicyStatement(
+                    actions=[
+                        "logs:CreateLogGroup",
+                        "logs:CreateLogStream",
+                        "logs:PutLogEvents"
+                    ],
+                    resources=[
+                        f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/codebuild/{codebuild_project_name}*"
+                    ],
+                ),
+                iam.PolicyStatement(
+                    actions=[
+                        "s3:GetObject",
+                        "s3:GetObjectVersion",
+                        "s3:PutObject"
+                    ],
+                    resources=[
+                        f"arn:aws:s3:::{application_bucket.bucket_name}/*"
+                    ],
+                ),
+            ],
+        )
+        codebuild_policy.attach_to_role(codebuild_role)
+
+        return codebuild_role
+
+
+    def _generate_codepipeline_cfn_deploy_action_role(self) -> iam.Role:
+        return iam.Role(
+            self,
+            "CFNDeployRole",
+            assumed_by=iam.ServicePrincipal("cloudformation.amazonaws.com"),
+            inline_policies={
+                "DeployAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            actions=[
+                                "cloudformation:CreateStack",
+                                "cloudformation:DeleteStack",
+                                "cloudformation:DescribeStacks",
+                                "cloudformation:UpdateStack",
+                                "cloudformation:CreateChangeSet",
+                                "cloudformation:DeleteChangeSet",
+                                "cloudformation:DescribeChangeSet",
+                                "cloudformation:ExecuteChangeSet",
+                                "cloudformation:SetStackPolicy",
+                                "cloudformation:ValidateTemplate",
+                            ],
+                            resources=[
+                                f"arn:aws:cloudformation:{self.region}:{self.account}:stack/{self.stack_name}*"
+                            ],
+                        )
+                    ]
+                )
+            },
+        )
+
+    def _generate_codepipeline_role(
+        self,
+        repository_name: str,
+        codepipeline_project_name: str,
+        artifact_bucket: s3.Bucket,
+    ) -> iam.Role:
         code_pipeline_policy_statments = [
             iam.PolicyStatement(
                 actions=[
@@ -141,53 +322,37 @@ class AwsCdkServerlessPipelineStack(Stack):
                     "s3:PutObject",
                     "s3:PutBucketVersioning",
                 ],
-                resources=["*"],
-            ),
-            iam.PolicyStatement(
-                actions=["cloudwatch:*", "iam:PassRole"],
-                resources=["*"],
-            ),
-            iam.PolicyStatement(
-                actions=["lambda:InvokeFunction", "lambda:ListFunctions"],
-                resources=["*"],
+                resources=[
+                    f"arn:aws:s3:::{artifact_bucket.bucket_name}",
+                    f"arn:aws:s3:::{artifact_bucket.bucket_name}/*",
+                ],
             ),
             iam.PolicyStatement(
                 actions=[
-                    "cloudformation:CreateStack",
-                    "cloudformation:DeleteStack",
-                    "cloudformation:DescribeStacks",
-                    "cloudformation:UpdateStack",
-                    "cloudformation:CreateChangeSet",
-                    "cloudformation:DeleteChangeSet",
-                    "cloudformation:DescribeChangeSet",
-                    "cloudformation:ExecuteChangeSet",
-                    "cloudformation:SetStackPolicy",
-                    "cloudformation:ValidateTemplate",
-                    "iam:PassRole",
+                    "cloudwatch:*"
                 ],
-                resources=["*"],
+                resources=[
+                    f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/codepipeline/{codepipeline_project_name}*"
+                ],
             ),
             iam.PolicyStatement(
-                actions=["codebuild:BatchGetBuilds", "codebuild:StartBuild"],
-                resources=["*"],
+                actions=[
+                    "lambda:InvokeFunction",
+                    "lambda:ListFunctions"
+                ],
+                resources=[
+                    f"arn:aws:lambda:{self.region}:{self.account}:function:{repository_name}*"
+                ],
             ),
+            iam.PolicyStatement(
+                actions=[
+                    "iam:PassRole"
+                ],
+                resources=["*"]
+            )
         ]
 
-        if source_type == "codecommit":
-            code_pipeline_policy_statments.append(
-                iam.PolicyStatement(
-                    actions=[
-                        "codecommit:CancelUploadArchive",
-                        "codecommit:GetBranch",
-                        "codecommit:GetCommit",
-                        "codecommit:GetUploadArchiveStatus",
-                        "codecommit:UploadArchive",
-                    ],
-                    resources=["*"],
-                ),
-            )
-
-        code_pipeline_role = iam.Role(
+        return iam.Role(
             self,
             "CodePipelineRole",
             assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
@@ -198,95 +363,56 @@ class AwsCdkServerlessPipelineStack(Stack):
             },
         )
 
-        cfn_deploy_role = iam.Role(
+
+    def _generate_codepipeline_source_action_role(
+        self,
+        repository_name: str
+    ) -> iam.Role:
+        return iam.Role(
             self,
-            "CFNDeployRole",
-            assumed_by=iam.ServicePrincipal("cloudformation.amazonaws.com"),
+            "SourceActionRole",
+            assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
             inline_policies={
-                "DeployAccess": iam.PolicyDocument(
+                "SourceAccess": iam.PolicyDocument(
                     statements=[
                         iam.PolicyStatement(
-                            actions=["*"],
-                            resources=["*"],
+                            actions=[
+                                "codecommit:GetBranch",
+                                "codecommit:GetCommit",
+                                "codecommit:UploadArchive",
+                                "codecommit:GetUploadArchiveStatus",
+                                "codecommit:CancelUploadArchive",
+                            ],
+                            resources=[
+                                f"arn:aws:codecommit:{self.region}:{self.account}:{repository_name}"
+                            ],
                         )
                     ]
                 )
             },
         )
-        cfn_deploy_role.assume_role_policy.add_statements(
-            iam.PolicyStatement(
-                actions=["sts:AssumeRole"],
-                principals=[iam.ArnPrincipal(code_pipeline_role.role_arn)],
-            )
-        )
 
-        build_output = codepipeline.Artifact("CompiledCFNTemplate")
-
-        app_pipeline = codepipeline.Pipeline(
+    def _generate_codepipeline_build_action_role(
+        self,
+        codebuild_project_name: str
+    ) -> iam.Role:
+        return iam.Role(
             self,
-            "AppPipeline",
-            pipeline_name=f"{application_name}Pipeline",
-            artifact_bucket=artifact_bucket_store,
-            role=code_pipeline_role,
-            pipeline_type=codepipeline.PipelineType.V2,
-        )
-
-        app_pipeline.add_stage(
-            stage_name="Source",
-            actions=[source_action],
-        )
-
-        app_pipeline.add_stage(
-            stage_name="Build",
-            actions=[
-                codepipeline_actions.CodeBuildAction(
-                    action_name="CodeBuild",
-                    project=app_package_build,
-                    input=source_output,
-                    outputs=[build_output],
+            "BuildActionRole",
+            assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
+            inline_policies={
+                "BuildAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            actions=[
+                                "codebuild:BatchGetBuilds",
+                                "codebuild:StartBuild",
+                            ],
+                            resources=[
+                                f"arn:aws:codebuild:{self.region}:{self.account}:project/{codebuild_project_name}"
+                            ],
+                        )
+                    ]
                 )
-            ],
+            },
         )
-
-        if environment in ["stg", "prd"]:
-            app_pipeline.add_stage(
-                stage_name="Approval",
-                actions=[
-                    codepipeline_actions.ManualApprovalAction(
-                        action_name="ManualApproval",
-                        additional_information="Please review the build artifacts before deploying.",
-                    )
-                ],
-            )
-
-        app_pipeline.add_stage(
-            stage_name="Deploy",
-            actions=[
-                codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
-                    action_name="CreateBetaChangeSet",
-                    stack_name=f"{application_name}BetaStack",
-                    change_set_name=f"{application_name}ChangeSet",
-                    admin_permissions=True,
-                    template_path=build_output.at_path("transformed.yaml"),
-                    run_order=1,
-                    role=cfn_deploy_role,
-                ),
-                codepipeline_actions.CloudFormationExecuteChangeSetAction(
-                    action_name="ExecuteChangeSet",
-                    stack_name=f"{application_name}BetaStack",
-                    change_set_name=f"{application_name}ChangeSet",
-                    run_order=2,
-                    output=codepipeline.Artifact("AppDeploymentValues"),
-                )
-            ],
-        )
-
-
-        #############################################################
-        # CloudFormation Outputs
-        #############################################################
-        CfnOutput(self, "S3ApplicationBucket", value=application_bucket.bucket_name)
-        CfnOutput(self, "CodeBuildRoleArn", value=code_build_role.role_arn)
-        CfnOutput(self, "S3PipelineBucket", value=artifact_bucket_store.bucket_name)
-        CfnOutput(self, "CodePipelineRoleArn", value=code_pipeline_role.role_arn)
-        CfnOutput(self, "CFNDeployRoleArn", value=cfn_deploy_role.role_arn)
