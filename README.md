@@ -1,17 +1,21 @@
-# generate-chalice-pipeline
+# aws-cdk-serverless-pipeline
 
-This repository provides an AWS CDK stack to build a CI/CD pipeline for deploying AWS Chalice applications.
-While Chalice offers the `chalice generate-pipeline` command to create CloudFormation templates, it has not been maintained for a long time and uses outdated configurations. This project was created to address those limitations and provide a modern solution.
+This repository is an AWS CDK project for building a CI/CD pipeline for general serverless applications.
+It builds based on the `buildspec.yml` included in the source code, generates a SAM template (`transformed.yaml`), and executes CloudFormation based on that template.
 
 ## Features
 
-- Supports **CodeCommit** as the source repository.
-- Automatically builds and deploys Chalice applications using **CodeBuild** and **CodePipeline**.
-- Allows customization through parameters like `application_name` and `existing_codecommit_repository_name`.
+- Supports **GitHub** or **CodeCommit** as source repositories.
+- Automatically builds and deploys serverless applications using **CodeBuild** and **CodePipeline**.
+- Flexible customization of environment and repository settings.
 
 ## Setup
+Install aws-cdk
+```bash
+$ npm install -g aws-cdk
+```
 
-install the required dependencies:
+Install the required dependencies:
 
 ```bash
 $ pip install -r requirements.txt
@@ -21,18 +25,22 @@ $ pip install -r requirements.txt
 
 The following CDK commands are available:
 
-- `cdk synth`: Synthesizes the CloudFormation template.
+- `cdk synth`: Generates a CloudFormation template.
 - `cdk deploy`: Deploys the stack to your AWS account/region.
 - `cdk diff`: Compares the deployed stack with the current state.
 - `cdk destroy`: Deletes the stack.
 
-### Context Values
+For more information, see the [AWS CDK Developer Guide](https://docs.aws.amazon.com/cdk/v2/guide/home.html).
 
-When deploying the stack, you can specify the following context values:
+## Context Values
 
-- `existingCodeCommitRepositoryName`: (Optional) If you already have a CodeCommit repository, specify its name here. Otherwise, a new repository will be created.
+The following context values can be specified during deployment:
 
-You can define these values in the `cdk.json` file or pass them as `--context` or `-c` options during deployment.
+- `applicationName`: The application name. Used as the CloudFormation stack name, CodeBuild name, and CodePipeline name.
+- `environment`: The environment name. Specify one of `dev`, `stg`, or `prd`. Used as the `ENV` environment variable in CodeBuild and for handling environment-specific logic in `buildspec.yml`.
+- `sourceType`: The type of source repository. Specify either `github` or `codecommit`.
+
+These values can be defined in the `cdk.json` file or specified during deployment using the `--context` or `-c` option.
 
 #### Example `cdk.json`
 
@@ -40,34 +48,47 @@ You can define these values in the `cdk.json` file or pass them as `--context` o
 {
   "app": "python3 app.py",
   "context": {
-    "existingCodeCommitRepositoryName": "MyExistingRepo"
+    "applicationName": "MyServerlessApp",
+    "environment": "dev",
+    "sourceType": "github"
   }
 }
 ```
 
-### Parameters
+## Parameters
 
-When deploying the stack, you can specify the following parameters:
+The following parameters can be specified during deployment:
 
-- `ApplicationName`: The name of your Chalice application. This will be used to name resources like the CodeCommit repository or CodePipeline.
+- `RepositoryName`: The name of the source repository.
+- `BranchName`: The branch name of the source repository.
+- `GithubOwner`: The owner name of the GitHub repository. Required if `source_type` is `github`.
+- `GithubConnectionArn`: The ARN of the CodeStar Connection. Required if `source_type` is `github`.
 
-You can pass them as `--parameters` options during deployment.
+These values can be specified using the `--parameters` option during deployment.
 
 ### Example Deployment Command
 
 ```bash
-$ cdk deploy --parameters ApplicationName=MyChaliceApp --context existingCodeCommitRepositoryName=MyExistingRepo
+$ cdk deploy \
+  --parameters RepositoryName=MyRepo \
+  --parameters BranchName=main \
+  --parameters GithubOwner=my-github-user \
+  --parameters GithubConnectionArn=arn:aws:codeconnections:region:account-id:connection/connection-id \
+  -c applicationName=MyServerlessApp \
+  -c environment=dev \
+  -c sourceType=github
 ```
 
-## Useful Commands
+## Build Process
 
-- `cdk ls`: List all stacks in the app.
-- `cdk synth`: Emit the synthesized CloudFormation template.
-- `cdk deploy`: Deploy this stack to your default AWS account/region.
-- `cdk diff`: Compare the deployed stack with the current state.
-- `cdk destroy`: Destroy the stack.
+This project uses `buildspec.yml` to define the build process. The following steps are performed to build and deploy the application:
+
+1. Fetch the source code (GitHub or CodeCommit).
+2. Execute the build based on `buildspec.yml`.
+3. Generate a SAM template (`transformed.yaml`).
+4. Deploy resources using CloudFormation.
 
 ## Notes
 
-- This project is designed to work with AWS Chalice applications.
-- Ensure that your AWS credentials are properly configured before deploying the stack.
+- This project is designed to build a CI/CD pipeline for AWS serverless applications.
+- Ensure that your AWS credentials are properly configured before deployment.

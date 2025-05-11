@@ -16,9 +16,10 @@ app = cdk.App()
 # Application name for use as the name of cloudformation stack ,codebuild, and codepipeline
 # Enter in Pascal case.
 application_name = app.node.try_get_context("applicationName")
-# Use as environment variable `ENV` for codebuild: `dev` or `stg` or `prd`
+# The environment name. Specify one of dev, stg, or prd.
+# Used as the ENV environment variable in CodeBuild and for handling environment-specific logic in buildspec.yml
 environment = app.node.try_get_context("environment")
-# Source Repository type: `github` or `codecommit``
+# The type of source repository. Specify either github or codecommit.
 source_type = app.node.try_get_context("sourceType")
 
 # Validation context

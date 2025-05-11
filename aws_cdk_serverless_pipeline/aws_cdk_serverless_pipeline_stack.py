@@ -32,25 +32,25 @@ class AwsCdkServerlessPipelineStack(Stack):
             self,
             "RepositoryName",
             type="String",
-            description="The name of source code repository codecommit or github",
+            description="The name of source code repository codecommit or github.",
         )
         branch_name_param = CfnParameter(
             self,
             "BranchName",
             type="String",
-            description="The name of repository branch",
+            description="The name of repository branch.",
         )
         github_owner_param = CfnParameter(
             self,
             "GithubOwner",
             type="String",
-            description="The name of github repository owner",
+            description="The name of github repository owner. Required if source_type context is github.",
         )
         github_connection_arn_param = CfnParameter(
             self,
             "GithubConnectionArn",
             type="String",
-            description="The name of connection arn of github",
+            description="The name of code star connection arn of github. Required if source_type context is github.",
         )
 
         repository_name = repository_name_param.value_as_string
