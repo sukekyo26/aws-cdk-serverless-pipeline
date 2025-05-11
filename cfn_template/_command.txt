@@ -1,0 +1,26 @@
+Example for codecommit_source_pipeline_template.json
+
+$ aws cloudformation deploy \
+  --stack-name CfnStack \
+  --template-file codecommit_source_pipeline_template.json \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Environment=dev \
+    ApplicationName=MyServerlessApp \
+    RepositoryName=MyRepo \
+    BranchName=main
+
+
+Example for github_source_pipeline_template.json
+
+$ aws cloudformation deploy \
+  --stack-name CfnStack \
+  --template-file github_source_pipeline_template.json \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Environment=dev \
+    ApplicationName=MyServerlessApp \
+    RepositoryName=MyRepo \
+    BranchName=main \
+    GithubOwner=my-github-user \
+    GithubConnectionArn=arn:aws:codeconnections:region:account-id:connection/connection-id
