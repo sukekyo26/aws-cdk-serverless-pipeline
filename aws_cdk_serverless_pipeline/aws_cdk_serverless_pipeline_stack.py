@@ -43,14 +43,17 @@ class AwsCdkServerlessPipelineStack(Stack):
         github_owner_param = CfnParameter(
             self,
             "GithubOwner",
+            default="",
             type="String",
             description="The name of github repository owner. Required if source_type context is github.",
         )
         github_connection_arn_param = CfnParameter(
             self,
             "GithubConnectionArn",
+            default="",
             type="String",
             description="The name of code star connection arn of github. Required if source_type context is github.",
+            no_echo=True,
         )
 
         repository_name = repository_name_param.value_as_string
