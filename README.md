@@ -68,6 +68,7 @@ These values can be specified using the `--parameters` option during deployment.
 
 ### Example Deployment Command
 
+Github Source
 ```bash
 $ cdk deploy \
   --parameters RepositoryName=MyRepo \
@@ -77,6 +78,16 @@ $ cdk deploy \
   -c applicationName=MyServerlessApp \
   -c environment=dev \
   -c sourceType=github
+```
+
+Codecommit Source
+```bash
+$ cdk deploy \
+  --parameters RepositoryName=MyRepo \
+  --parameters BranchName=main \
+  -c applicationName=MyServerlessApp \
+  -c environment=dev \
+  -c sourceType=codecommit
 ```
 
 ## Build Process
