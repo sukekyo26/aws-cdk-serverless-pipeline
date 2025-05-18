@@ -64,7 +64,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         github_connection_arn_name = github_connection_arn_param.value_as_string
 
         #############################################################
-        # CodePipeline Role
+        # CodePipeline
         #############################################################
         codepipeline_project_name = f"{application_name}Pipeline"
         artifact_bucket = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
@@ -73,6 +73,15 @@ class AwsCdkServerlessPipelineStack(Stack):
             repository_name=repository_name,
             codepipeline_project_name=codepipeline_project_name,
             artifact_bucket=artifact_bucket,
+        )
+
+        codepipeline_project = codepipeline.Pipeline(
+            self,
+            "AppPipeline",
+            pipeline_name=codepipeline_project_name,
+            artifact_bucket=artifact_bucket,
+            role=cast(iam.IRole, codepipeline_role),
+            pipeline_type=codepipeline.PipelineType.V2,
         )
 
         #############################################################
@@ -107,6 +116,11 @@ class AwsCdkServerlessPipelineStack(Stack):
             )
         else:
             raise ValueError(f"Unsupported source_type: {source_type}")
+
+        codepipeline_project.add_stage(
+            stage_name="Source",
+            actions=[codepipeline_source_action],
+        )
 
         #############################################################
         # CodeBuild
@@ -146,6 +160,11 @@ class AwsCdkServerlessPipelineStack(Stack):
             role=cast(iam.IRole, codepipeline_build_action_role)
         )
 
+        codepipeline_project.add_stage(
+            stage_name="Build",
+            actions=[codepipeline_build_action],
+        )
+
         #############################################################
         # Approval only stg and prd
         #############################################################
@@ -154,6 +173,11 @@ class AwsCdkServerlessPipelineStack(Stack):
             codepipeline_manual_approval_action = codepipeline_actions.ManualApprovalAction(
                 action_name="ManualApproval",
                 additional_information="Please review the build artifacts before deploying.",
+            )
+
+            codepipeline_project.add_stage(
+                stage_name="Approval",
+                actions=[codepipeline_manual_approval_action],
             )
 
         #############################################################
@@ -181,34 +205,6 @@ class AwsCdkServerlessPipelineStack(Stack):
             output=codepipeline.Artifact("AppDeploymentValues"),
         )
 
-        #############################################################
-        # CodePipeline
-        #############################################################
-        codepipeline_project = codepipeline.Pipeline(
-            self,
-            "AppPipeline",
-            pipeline_name=codepipeline_project_name,
-            artifact_bucket=artifact_bucket,
-            role=cast(iam.IRole, codepipeline_role),
-            pipeline_type=codepipeline.PipelineType.V2,
-        )
-
-        codepipeline_project.add_stage(
-            stage_name="Source",
-            actions=[codepipeline_source_action],
-        )
-
-        codepipeline_project.add_stage(
-            stage_name="Build",
-            actions=[codepipeline_build_action],
-        )
-
-        if codepipeline_manual_approval_action is not None:
-            codepipeline_project.add_stage(
-                stage_name="Approval",
-                actions=[codepipeline_manual_approval_action],
-            )
-
         codepipeline_project.add_stage(
             stage_name="CfnDeploy",
             actions=[
@@ -216,7 +212,6 @@ class AwsCdkServerlessPipelineStack(Stack):
                 codepipeline_cloudformation_execute_change_set_action
             ],
         )
-
 
         #############################################################
         # CloudFormation Outputs
