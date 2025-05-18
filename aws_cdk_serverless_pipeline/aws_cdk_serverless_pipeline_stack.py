@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from aws_cdk import (
     CfnOutput,
     CfnParameter,
@@ -21,7 +23,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         application_name: str,
         environment: str, # environment name (dev, stg, prd)
         source_type: str, # source code repository type (github or codecommit)
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -62,9 +64,22 @@ class AwsCdkServerlessPipelineStack(Stack):
         github_connection_arn_name = github_connection_arn_param.value_as_string
 
         #############################################################
+        # CodePipeline Role
+        #############################################################
+        codepipeline_project_name = f"{application_name}Pipeline"
+        artifact_bucket = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
+
+        codepipeline_role: iam.Role = self._generate_codepipeline_role(
+            repository_name=repository_name,
+            codepipeline_project_name=codepipeline_project_name,
+            artifact_bucket=artifact_bucket,
+        )
+
+        #############################################################
         # Source
         #############################################################
         source_output = codepipeline.Artifact("SourceRepo")
+        codepipeline_source_action = None
         if source_type == "github":
             codepipeline_source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
                 action_name="GitHubSource",
@@ -76,6 +91,7 @@ class AwsCdkServerlessPipelineStack(Stack):
             )
         elif source_type == "codecommit":
             codepipeline_source_action_role: iam.Role = self._generate_codepipeline_source_action_role(
+                codepipeline_role=cast(iam.IRole, codepipeline_role),
                 repository_name=repository_name
             )
             codepipeline_source_action = codepipeline_actions.CodeCommitSourceAction(
@@ -87,8 +103,10 @@ class AwsCdkServerlessPipelineStack(Stack):
                 ),
                 branch=branch_name,
                 output=source_output,
-                role=codepipeline_source_action_role
+                role=cast(iam.IRole, codepipeline_source_action_role)
             )
+        else:
+            raise ValueError(f"Unsupported source_type: {source_type}")
 
         #############################################################
         # CodeBuild
@@ -102,12 +120,13 @@ class AwsCdkServerlessPipelineStack(Stack):
             application_bucket=application_bucket
         )
         codepipeline_build_action_role: iam.Role = self._generate_codepipeline_build_action_role(
+            codepipeline_role=cast(iam.IRole, codepipeline_role),
             codebuild_project_name=codebuild_project_name
         )
 
         codepipeline_build_action = codepipeline_actions.CodeBuildAction(
             action_name="CodeBuild",
-            project=codebuild.PipelineProject(
+            project=cast(codebuild.IProject, codebuild.PipelineProject(
                 self,
                 "AppPackageBuild",
                 project_name=codebuild_project_name,
@@ -119,17 +138,18 @@ class AwsCdkServerlessPipelineStack(Stack):
                         "APP_S3_BUCKET": codebuild.BuildEnvironmentVariable(value=application_bucket.bucket_name)
                     },
                 ),
-                role=codebuild_role,
+                role=cast(iam.IRole, codebuild_role),
                 build_spec=codebuild.BuildSpec.from_source_filename("buildspec.yml"),
-            ),
+            )),
             input=source_output,
             outputs=[build_output],
-            role=codepipeline_build_action_role
+            role=cast(iam.IRole, codepipeline_build_action_role)
         )
 
         #############################################################
         # Approval only stg and prd
         #############################################################
+        codepipeline_manual_approval_action = None
         if environment in ["stg", "prd"]:
             codepipeline_manual_approval_action = codepipeline_actions.ManualApprovalAction(
                 action_name="ManualApproval",
@@ -139,16 +159,18 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         # CfnDeploy
         #############################################################
-        codepipeline_cfn_deploy_action_role: iam.Role = self._generate_codepipeline_cfn_deploy_action_role()
+        codepipeline_cfn_deploy_action_role: iam.Role = self._generate_codepipeline_cfn_deploy_action_role(
+            codepipeline_role=cast(iam.IRole, codepipeline_role)
+        )
 
         codepipeline_cloudformation_create_replace_change_set_action = codepipeline_actions.CloudFormationCreateReplaceChangeSetAction(
-            action_name="CreateBetaChangeSet",
+            action_name="CreateReplaceChangeSet",
             stack_name=f"{application_name}BetaStack",
             change_set_name=f"{application_name}ChangeSet",
             admin_permissions=True,
             template_path=build_output.at_path("transformed.yaml"),
             run_order=1,
-            role=codepipeline_cfn_deploy_action_role,
+            role=cast(iam.IRole, codepipeline_cfn_deploy_action_role),
         )
 
         codepipeline_cloudformation_execute_change_set_action = codepipeline_actions.CloudFormationExecuteChangeSetAction(
@@ -162,43 +184,12 @@ class AwsCdkServerlessPipelineStack(Stack):
         #############################################################
         # CodePipeline
         #############################################################
-        codepipeline_project_name = f"{application_name}Pipeline"
-        artifact_bucket = s3.Bucket(self, "ArtifactBucketStore", versioned=True)
-
-        codepipeline_role: iam.Role = self._generate_codepipeline_role(
-            repository_name=repository_name,
-            codepipeline_project_name=codepipeline_project_name,
-            artifact_bucket=artifact_bucket,
-        )
-
-        if source_type == "codecommit":
-            codepipeline_source_action_role.assume_role_policy.add_statements(
-                iam.PolicyStatement(
-                    actions=["sts:AssumeRole"],
-                    principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
-                )
-            )
-
-        codepipeline_build_action_role.assume_role_policy.add_statements(
-            iam.PolicyStatement(
-                actions=["sts:AssumeRole"],
-                principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
-            )
-        )
-
-        codepipeline_cfn_deploy_action_role.assume_role_policy.add_statements(
-            iam.PolicyStatement(
-                actions=["sts:AssumeRole"],
-                principals=[iam.ArnPrincipal(codepipeline_role.role_arn)],
-            )
-        )
-
         codepipeline_project = codepipeline.Pipeline(
             self,
             "AppPipeline",
             pipeline_name=codepipeline_project_name,
             artifact_bucket=artifact_bucket,
-            role=codepipeline_role,
+            role=cast(iam.IRole, codepipeline_role),
             pipeline_type=codepipeline.PipelineType.V2,
         )
 
@@ -212,7 +203,7 @@ class AwsCdkServerlessPipelineStack(Stack):
             actions=[codepipeline_build_action],
         )
 
-        if environment in ["stg", "prd"]:
+        if codepipeline_manual_approval_action is not None:
             codepipeline_project.add_stage(
                 stage_name="Approval",
                 actions=[codepipeline_manual_approval_action],
@@ -245,7 +236,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         codebuild_role = iam.Role(
             self,
             "CodeBuildRole",
-            assumed_by=iam.ServicePrincipal("codebuild.amazonaws.com"),
+            assumed_by=cast(iam.IPrincipal, iam.ServicePrincipal("codebuild.amazonaws.com")),
         )
         codebuild_policy = iam.Policy(
             self,
@@ -274,40 +265,9 @@ class AwsCdkServerlessPipelineStack(Stack):
                 ),
             ],
         )
-        codebuild_policy.attach_to_role(codebuild_role)
+        codebuild_policy.attach_to_role(cast(iam.IRole, codebuild_role))
 
         return codebuild_role
-
-
-    def _generate_codepipeline_cfn_deploy_action_role(self) -> iam.Role:
-        return iam.Role(
-            self,
-            "CFNDeployRole",
-            assumed_by=iam.ServicePrincipal("cloudformation.amazonaws.com"),
-            inline_policies={
-                "DeployAccess": iam.PolicyDocument(
-                    statements=[
-                        iam.PolicyStatement(
-                            actions=[
-                                "cloudformation:CreateStack",
-                                "cloudformation:DeleteStack",
-                                "cloudformation:DescribeStacks",
-                                "cloudformation:UpdateStack",
-                                "cloudformation:CreateChangeSet",
-                                "cloudformation:DeleteChangeSet",
-                                "cloudformation:DescribeChangeSet",
-                                "cloudformation:ExecuteChangeSet",
-                                "cloudformation:SetStackPolicy",
-                                "cloudformation:ValidateTemplate",
-                            ],
-                            resources=[
-                                f"arn:aws:cloudformation:{self.region}:{self.account}:stack/{self.stack_name}*"
-                            ],
-                        )
-                    ]
-                )
-            },
-        )
 
     def _generate_codepipeline_role(
         self,
@@ -358,7 +318,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         return iam.Role(
             self,
             "CodePipelineRole",
-            assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
+            assumed_by=cast(iam.IPrincipal, iam.ServicePrincipal("codepipeline.amazonaws.com")),
             inline_policies={
                 "DefaultPolicy": iam.PolicyDocument(
                     statements=code_pipeline_policy_statments
@@ -366,15 +326,18 @@ class AwsCdkServerlessPipelineStack(Stack):
             },
         )
 
-
     def _generate_codepipeline_source_action_role(
         self,
+        codepipeline_role: iam.IRole,
         repository_name: str
     ) -> iam.Role:
         return iam.Role(
             self,
             "SourceActionRole",
-            assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
+            assumed_by=cast(iam.IPrincipal, iam.CompositePrincipal(
+                cast(iam.IPrincipal, iam.ServicePrincipal("codepipeline.amazonaws.com")),
+                cast(iam.IPrincipal, iam.ArnPrincipal(codepipeline_role.role_arn))),
+            ),
             inline_policies={
                 "SourceAccess": iam.PolicyDocument(
                     statements=[
@@ -397,12 +360,16 @@ class AwsCdkServerlessPipelineStack(Stack):
 
     def _generate_codepipeline_build_action_role(
         self,
+        codepipeline_role: iam.IRole,
         codebuild_project_name: str
     ) -> iam.Role:
         return iam.Role(
             self,
             "BuildActionRole",
-            assumed_by=iam.ServicePrincipal("codepipeline.amazonaws.com"),
+            assumed_by=cast(iam.IPrincipal, iam.CompositePrincipal(
+                cast(iam.IPrincipal, iam.ServicePrincipal("codebuild.amazonaws.com")),
+                cast(iam.IPrincipal, iam.ArnPrincipal(codepipeline_role.role_arn))),
+            ),
             inline_policies={
                 "BuildAccess": iam.PolicyDocument(
                     statements=[
@@ -413,6 +380,42 @@ class AwsCdkServerlessPipelineStack(Stack):
                             ],
                             resources=[
                                 f"arn:aws:codebuild:{self.region}:{self.account}:project/{codebuild_project_name}"
+                            ],
+                        )
+                    ]
+                )
+            },
+        )
+
+    def _generate_codepipeline_cfn_deploy_action_role(
+            self,
+            codepipeline_role: iam.IRole,
+        ) -> iam.Role:
+        return iam.Role(
+            self,
+            "CFNDeployRole",
+            assumed_by=cast(iam.IPrincipal, iam.CompositePrincipal(
+                cast(iam.IPrincipal, iam.ServicePrincipal("cloudformation.amazonaws.com")),
+                cast(iam.IPrincipal, iam.ArnPrincipal(codepipeline_role.role_arn))),
+            ),
+            inline_policies={
+                "DeployAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            actions=[
+                                "cloudformation:CreateStack",
+                                "cloudformation:DeleteStack",
+                                "cloudformation:DescribeStacks",
+                                "cloudformation:UpdateStack",
+                                "cloudformation:CreateChangeSet",
+                                "cloudformation:DeleteChangeSet",
+                                "cloudformation:DescribeChangeSet",
+                                "cloudformation:ExecuteChangeSet",
+                                "cloudformation:SetStackPolicy",
+                                "cloudformation:ValidateTemplate",
+                            ],
+                            resources=[
+                                f"arn:aws:cloudformation:{self.region}:{self.account}:stack/{self.stack_name}*"
                             ],
                         )
                     ]

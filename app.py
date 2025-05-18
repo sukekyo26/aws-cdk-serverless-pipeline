@@ -23,7 +23,7 @@ environment = app.node.try_get_context("environment")
 source_type = app.node.try_get_context("sourceType")
 
 # Validation context
-missing_contexts = []
+missing_contexts: list[str] = []
 
 if not application_name:
     missing_contexts.append("stackName")
