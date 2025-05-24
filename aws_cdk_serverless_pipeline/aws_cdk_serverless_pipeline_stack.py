@@ -123,7 +123,7 @@ class AwsCdkServerlessPipelineStack(Stack):
         )
 
         #############################################################
-        # CodeBuild
+        # Build
         #############################################################
         codebuild_project_name = f"{application_name}Build"
         application_bucket = s3.Bucket(self, "ApplicationBucket")
