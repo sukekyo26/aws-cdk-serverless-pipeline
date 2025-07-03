@@ -8,7 +8,8 @@ $ aws cloudformation deploy \
     Environment=dev \
     ApplicationName=MyServerlessApp \
     RepositoryName=MyRepo \
-    BranchName=main
+    BranchName=main \
+    TemplateFileName=packaged.yaml
 
 
 Example for github_source_pipeline_template.json
@@ -22,5 +23,6 @@ $ aws cloudformation deploy \
     ApplicationName=MyServerlessApp \
     RepositoryName=MyRepo \
     BranchName=main \
+    TemplateFileName=packaged.yaml \
     GithubOwner=my-github-user \
     GithubConnectionArn=arn:aws:codeconnections:region:account-id:connection/connection-id

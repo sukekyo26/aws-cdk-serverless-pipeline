@@ -42,6 +42,13 @@ class AwsCdkServerlessPipelineStack(Stack):
             type="String",
             description="The name of repository branch.",
         )
+        template_file_name_param = CfnParameter(
+            self,
+            "TemplateFileName",
+            default="packaged.yaml",
+            type="String",
+            description="The name of the packaged template file.",
+        )
         github_owner_param = CfnParameter(
             self,
             "GithubOwner",
@@ -60,6 +67,7 @@ class AwsCdkServerlessPipelineStack(Stack):
 
         repository_name = repository_name_param.value_as_string
         branch_name = branch_name_param.value_as_string
+        template_file_name = template_file_name_param.value_as_string
         github_owner_name = github_owner_param.value_as_string
         github_connection_arn_name = github_connection_arn_param.value_as_string
 
@@ -192,7 +200,7 @@ class AwsCdkServerlessPipelineStack(Stack):
             stack_name=f"{application_name}BetaStack",
             change_set_name=f"{application_name}ChangeSet",
             admin_permissions=True,
-            template_path=build_output.at_path("transformed.yaml"),
+            template_path=build_output.at_path(template_file_name),
             run_order=1,
             role=cast(iam.IRole, codepipeline_cfn_deploy_action_role),
         )

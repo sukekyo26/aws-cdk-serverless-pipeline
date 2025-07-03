@@ -1,7 +1,7 @@
 # aws-cdk-serverless-pipeline
 
 This repository is an AWS CDK project for building a CI/CD pipeline for general serverless applications.
-It builds based on the `buildspec.yml` included in the source code, generates a SAM template (`transformed.yaml`), and executes CloudFormation based on that template.
+It builds based on the `buildspec.yml` included in the source code, generates a SAM template (`packaged.yaml`), and executes CloudFormation based on that template.
 
 ## Features
 
@@ -61,6 +61,7 @@ The following parameters can be specified during deployment:
 
 - `RepositoryName`: The name of the source repository.
 - `BranchName`: The branch name of the source repository.
+- `TemplateFileName`: The name of the packaged template file (default: `packaged.yaml`).
 - `GithubOwner`: The owner name of the GitHub repository. Required if `source_type` is `github`.
 - `GithubConnectionArn`: The ARN of the CodeStar Connection. Required if `source_type` is `github`.
 
@@ -73,6 +74,7 @@ Github Source
 $ cdk deploy \
   --parameters RepositoryName=MyRepo \
   --parameters BranchName=main \
+  --parameters TemplateFileName=packaged.yaml \
   --parameters GithubOwner=my-github-user \
   --parameters GithubConnectionArn=arn:aws:codeconnections:region:account-id:connection/connection-id \
   -c applicationName=MyServerlessApp \
@@ -85,6 +87,7 @@ Codecommit Source
 $ cdk deploy \
   --parameters RepositoryName=MyRepo \
   --parameters BranchName=main \
+  --parameters TemplateFileName=packaged.yaml \
   -c applicationName=MyServerlessApp \
   -c environment=dev \
   -c sourceType=codecommit
@@ -96,7 +99,7 @@ This project uses `buildspec.yml` to define the build process. The following ste
 
 1. Fetch the source code (GitHub or CodeCommit).
 2. Execute the build based on `buildspec.yml`.
-3. Generate a SAM template (`transformed.yaml`).
+3. Generate a SAM template (`packaged.yaml`).
 4. Deploy resources using CloudFormation.
 
 ## Notes
