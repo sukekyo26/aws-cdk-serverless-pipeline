@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from aws_cdk import (
+    CfnCapabilities,
     CfnOutput,
     CfnParameter,
     Stack,
@@ -203,6 +204,9 @@ class AwsCdkServerlessPipelineStack(Stack):
             template_path=build_output.at_path(template_file_name),
             run_order=1,
             role=cast(iam.IRole, codepipeline_cfn_deploy_action_role),
+            cfn_capabilities=[
+                CfnCapabilities.ANONYMOUS_IAM
+            ]
         )
 
         codepipeline_cloudformation_execute_change_set_action = codepipeline_actions.CloudFormationExecuteChangeSetAction(
