@@ -1,0 +1,68 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "ApplicationName": {
+      "Default": "ServerlessApp",
+      "Type": "String",
+      "Description": "Name of your application"
+    },
+    "RepositoryName": {
+      "Type": "String",
+      "Description": "Name of your CodeCommit repository"
+    },
+    "PipelineAccountId": {
+      "Type": "String",
+      "Description": "AWS Account ID of the pipeline (CodePipeline) side"
+    }
+  },
+  "Resources": {
+    "CrossAccountRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": {
+          "Fn::Sub": "${ApplicationName}CrossAccountRole"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:aws:iam::${PipelineAccountId}:root"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CrossAccountPipelinePolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "CodeCommitAccessPolicy",
+                  "Effect": "Allow",
+                  "Action": [
+                    "codecommit:GetBranch",
+                    "codecommit:GetCommit",
+                    "codecommit:GetUploadArchiveStatus",
+                    "codecommit:UploadArchive",
+                    "codecommit:CancelUploadArchive"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${RepositoryName}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

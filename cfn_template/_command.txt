@@ -1,4 +1,8 @@
-Example for codecommit_source_pipeline_template.json
+####################################################################################
+## Example for codecommit source pipeline
+####################################################################################
+
+This is a basic example for deploying a pipeline with CodeCommit as the source.
 
 $ aws cloudformation deploy \
   --stack-name CfnStack \
@@ -8,11 +12,14 @@ $ aws cloudformation deploy \
     Environment=dev \
     ApplicationName=MyServerlessApp \
     RepositoryName=MyRepo \
-    BranchName=main \
-    TemplateFileName=packaged.yaml
+    BranchName=main
 
+####################################################################################
+## Example for github source pipeline
+####################################################################################
 
-Example for github_source_pipeline_template.json
+This is a basic example for deploying a pipeline with GitHub as the source.
+Make sure to provide your GitHub owner and connection ARN.
 
 $ aws cloudformation deploy \
   --stack-name CfnStack \
@@ -23,6 +30,48 @@ $ aws cloudformation deploy \
     ApplicationName=MyServerlessApp \
     RepositoryName=MyRepo \
     BranchName=main \
-    TemplateFileName=packaged.yaml \
     GithubOwner=my-github-user \
     GithubConnectionArn=arn:aws:codeconnections:region:account-id:connection/connection-id
+
+####################################################################################
+## Example for cross account pipeline
+####################################################################################
+# 1st. Create and deploy the IAM role in the source account
+This step creates an IAM role in the source account that allows cross-account access from the pipeline account.
+
+$ aws cloudformation deploy \
+  --stack-name CrossAccountRoleStack \
+  --template-file cross_account_codecommit_source_iam_role_template.json \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    ApplicationName=MyServerlessApp \
+    RepositoryName=MyRepo \
+    PipelineAccountId=PIPELINE-ACCOUNT-ID
+
+# 2nd. Create and deploy the CodePipeline in the pipeline account (using the IAM role from step 1)
+This step creates the pipeline in the pipeline account, referencing the IAM role created in the source account.
+
+$ aws cloudformation deploy \
+  --stack-name CfnStack \
+  --template-file other_account_codecommit_source_pipeline_template.json \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Environment=dev \
+    ApplicationName=MyServerlessApp \
+    RepositoryName=MyRepo \
+    BranchName=main \
+    SourceAccountId=123456789012
+
+# 3rd. Update the IAM role in the source account (add KMS ARN and ArtifactBucketName)
+This step updates the IAM role in the source account to allow access to the artifact bucket and KMS key.
+
+$ aws cloudformation deploy \
+  --stack-name CrossAccountRoleStack \
+  --template-file cross_account_codecommit_source_update_iam_role_template.json \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    ApplicationName=MyServerlessApp \
+    RepositoryName=MyRepo \
+    PipelineAccountId=PIPELINE-ACCOUNT-ID \
+    ArtifactBucketName=ARTIFACT-BUCKET-NAME \
+    KmsKeyArn=KMS-KEY-ARN

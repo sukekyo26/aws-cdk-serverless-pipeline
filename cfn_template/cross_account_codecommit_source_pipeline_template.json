@@ -1,0 +1,644 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "Environment": {
+      "Default": "dev",
+      "Type": "String",
+      "Description": "Name of the environment"
+    },
+    "ApplicationName": {
+      "Default": "ServerlessApp",
+      "Type": "String",
+      "Description": "Name of your application"
+    },
+    "RepositoryName": {
+      "Type": "String",
+      "Description": "Name of your repository"
+    },
+    "BranchName": {
+      "Default": "develop",
+      "Type": "String",
+      "Description": "Name of your branch"
+    },
+    "CodeBuildImage": {
+      "Default": "aws/codebuild/amazonlinux2-x86_64-standard:5.0",
+      "Type": "String",
+      "Description": "Name of codebuild image to use."
+    },
+    "SourceAccountId": {
+      "Type": "String",
+      "Description": "AWS Account ID where the CodeCommit repository is located"
+    }
+  },
+  "Resources": {
+    "PipelineKMSKey": {
+      "Type": "AWS::KMS::Key",
+      "Properties": {
+        "Description": "KMS Key for CodePipeline cross-account access",
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "Enable IAM User Permissions",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root"
+                }
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "Allow CodePipeline service",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codepipeline.amazonaws.com"
+              },
+              "Action": [
+                "kms:Decrypt",
+                "kms:DescribeKey",
+                "kms:Encrypt",
+                "kms:GenerateDataKey",
+                "kms:ReEncrypt*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "Allow CodeBuild service",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codebuild.amazonaws.com"
+              },
+              "Action": [
+                "kms:Decrypt",
+                "kms:DescribeKey",
+                "kms:Encrypt",
+                "kms:GenerateDataKey",
+                "kms:ReEncrypt*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "Allow source account access",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:aws:iam::${SourceAccountId}:root"
+                }
+              },
+              "Action": [
+                "kms:Decrypt",
+                "kms:DescribeKey",
+                "kms:Encrypt",
+                "kms:GenerateDataKey",
+                "kms:ReEncrypt*"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+    "PipelineKMSKeyAlias": {
+      "Type": "AWS::KMS::Alias",
+      "Properties": {
+        "AliasName": {
+          "Fn::Sub": "alias/${ApplicationName}-pipeline-key"
+        },
+        "TargetKeyId": {
+          "Ref": "PipelineKMSKey"
+        }
+      }
+    },
+    "ApplicationBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "aws:kms",
+                "KMSMasterKeyID": { "Ref": "PipelineKMSKey" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CodeBuildRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  {
+                    "Fn::Sub": "codebuild.${AWS::URLSuffix}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CodeBuildPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "CodeBuildPolicy",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "*",
+              "Effect": "Allow"
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:PutObject"
+              ],
+              "Resource": "arn:*:s3:::*",
+              "Effect": "Allow"
+            },
+            {
+              "Action": [
+                "kms:Decrypt",
+                "kms:DescribeKey",
+                "kms:Encrypt",
+                "kms:GenerateDataKey",
+                "kms:ReEncrypt*"
+              ],
+              "Resource": "*",
+              "Effect": "Allow"
+            }
+          ]
+        },
+        "Roles": [
+          {
+            "Ref": "CodeBuildRole"
+          }
+        ]
+      }
+    },
+    "AppPackageBuild": {
+      "Type": "AWS::CodeBuild::Project",
+      "Properties": {
+        "Artifacts": {
+          "Type": "CODEPIPELINE"
+        },
+        "Environment": {
+          "ComputeType": "BUILD_GENERAL1_SMALL",
+          "Image": {
+            "Ref": "CodeBuildImage"
+          },
+          "Type": "LINUX_CONTAINER",
+          "EnvironmentVariables": [
+            {
+              "Name": "APP_S3_BUCKET",
+              "Value": {
+                "Ref": "ApplicationBucket"
+              }
+            },
+            {
+              "Name": "ENV",
+              "Value": {
+                "Ref": "Environment"
+              }
+            }
+          ]
+        },
+        "Name": {
+          "Fn::Sub": "${ApplicationName}Build"
+        },
+        "ServiceRole": {
+          "Fn::GetAtt": "CodeBuildRole.Arn"
+        },
+        "Source": {
+          "Type": "CODEPIPELINE",
+          "BuildSpec": "buildspec.yml"
+        }
+      }
+    },
+    "AppPipeline": {
+      "Type": "AWS::CodePipeline::Pipeline",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${ApplicationName}Pipeline"
+        },
+        "ArtifactStore": {
+          "Type": "S3",
+          "Location": {
+            "Ref": "ArtifactBucketStore"
+          },
+          "EncryptionKey": {
+            "Id": {
+              "Fn::Sub": "arn:aws:kms:ap-northeast-1:${AWS::AccountId}:key/${PipelineKMSKey}"
+            },
+            "Type": "KMS"
+          }
+        },
+        "RoleArn": {
+          "Fn::GetAtt": "CodePipelineRole.Arn"
+        },
+        "Stages": [
+          {
+            "Name": "Source",
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Source",
+                  "Owner": "AWS",
+                  "Version": 1,
+                  "Provider": "CodeCommit"
+                },
+                "Configuration": {
+                  "BranchName": {
+                    "Ref": "BranchName"
+                  },
+                  "RepositoryName": {
+                    "Ref": "RepositoryName"
+                  }
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "SourceRepo"
+                  }
+                ],
+                "RoleArn": {
+                  "Fn::Sub": "arn:aws:iam::${SourceAccountId}:role/${ApplicationName}CrossAccountRole"
+                },
+                "RunOrder": 1,
+                "Name": "CodeCommitSource"
+              }
+            ]
+          },
+          {
+            "Name": "Build",
+            "Actions": [
+              {
+                "InputArtifacts": [
+                  {
+                    "Name": "SourceRepo"
+                  }
+                ],
+                "Name": "CodeBuild",
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "CodeBuild"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "CompiledCFNTemplate"
+                  }
+                ],
+                "Configuration": {
+                  "ProjectName": {
+                    "Ref": "AppPackageBuild"
+                  }
+                },
+                "RunOrder": 1
+              }
+            ]
+          },
+          {
+            "Name": "Approval",
+            "Actions": [
+              {
+                "Name": "ManualApproval",
+                "ActionTypeId": {
+                  "Category": "Approval",
+                  "Owner": "AWS",
+                  "Provider": "Manual",
+                  "Version": "1"
+                },
+                "RunOrder": 1,
+                "Configuration": {
+                  "CustomData": "問題なければ承認してください。"
+                },
+                "OutputArtifacts": [],
+                "InputArtifacts": [],
+                "Region": "ap-northeast-1"
+              }
+            ]
+          },
+          {
+            "Name": "Deploy",
+            "Actions": [
+              {
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "CloudFormation"
+                },
+                "InputArtifacts": [
+                  {
+                    "Name": "CompiledCFNTemplate"
+                  }
+                ],
+                "Name": "CreateBetaChangeSet",
+                "Configuration": {
+                  "ActionMode": "CHANGE_SET_REPLACE",
+                  "ChangeSetName": {
+                    "Fn::Sub": "${ApplicationName}ChangeSet"
+                  },
+                  "RoleArn": {
+                    "Fn::GetAtt": "CFNDeployRole.Arn"
+                  },
+                  "Capabilities": "CAPABILITY_IAM",
+                  "StackName": {
+                    "Fn::Sub": "${ApplicationName}BetaStack"
+                  },
+                  "TemplatePath": "CompiledCFNTemplate::transformed.yaml"
+                },
+                "RunOrder": 1
+              },
+              {
+                "RunOrder": 2,
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "CloudFormation"
+                },
+                "Configuration": {
+                  "StackName": {
+                    "Fn::Sub": "${ApplicationName}BetaStack"
+                  },
+                  "ActionMode": "CHANGE_SET_EXECUTE",
+                  "ChangeSetName": {
+                    "Fn::Sub": "${ApplicationName}ChangeSet"
+                  },
+                  "OutputFileName": "StackOutputs.json"
+                },
+                "Name": "ExecuteChangeSet",
+                "OutputArtifacts": [
+                  {
+                    "Name": "AppDeploymentValues"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ArtifactBucketStore": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "aws:kms",
+                "KMSMasterKeyID": {
+                  "Fn::Sub": "arn:aws:kms:ap-northeast-1:${AWS::AccountId}:key/${PipelineKMSKey}"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ArtifactBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "ArtifactBucketStore" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowCodeCommitCrossAccountRolePutObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:aws:iam::${SourceAccountId}:role/${ApplicationName}CrossAccountRole"
+                }
+              },
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:aws:s3:::${ArtifactBucketStore}/*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CodePipelineRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Policies": [
+          {
+            "PolicyName": "DefaultPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectVersion",
+                    "s3:GetBucketVersioning",
+                    "s3:CreateBucket",
+                    "s3:PutObject",
+                    "s3:PutBucketVersioning"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "codecommit:CancelUploadArchive",
+                    "codecommit:GetBranch",
+                    "codecommit:GetCommit",
+                    "codecommit:GetUploadArchiveStatus",
+                    "codecommit:UploadArchive"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "sts:AssumeRole"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:iam::${SourceAccountId}:role/${ApplicationName}CrossAccountRole"
+                  },
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "kms:Decrypt",
+                    "kms:DescribeKey",
+                    "kms:Encrypt",
+                    "kms:GenerateDataKey",
+                    "kms:ReEncrypt*"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "cloudwatch:*",
+                    "iam:PassRole"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "lambda:InvokeFunction",
+                    "lambda:ListFunctions"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "cloudformation:CreateStack",
+                    "cloudformation:DeleteStack",
+                    "cloudformation:DescribeStacks",
+                    "cloudformation:UpdateStack",
+                    "cloudformation:CreateChangeSet",
+                    "cloudformation:DeleteChangeSet",
+                    "cloudformation:DescribeChangeSet",
+                    "cloudformation:ExecuteChangeSet",
+                    "cloudformation:SetStackPolicy",
+                    "cloudformation:ValidateTemplate",
+                    "iam:PassRole"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "codebuild:BatchGetBuilds",
+                    "codebuild:StartBuild"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          }
+        ],
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  {
+                    "Fn::Sub": "codepipeline.${AWS::URLSuffix}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CFNDeployRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Policies": [
+          {
+            "PolicyName": "DeployAccess",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": "*",
+                  "Resource": "*",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          }
+        ],
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  {
+                    "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "S3ApplicationBucket": {
+      "Value": {
+        "Ref": "ApplicationBucket"
+      }
+    },
+    "CodeBuildRoleArn": {
+      "Value": {
+        "Fn::GetAtt": "CodeBuildRole.Arn"
+      }
+    },
+    "S3PipelineBucket": {
+      "Value": {
+        "Ref": "ArtifactBucketStore"
+      }
+    },
+    "CodePipelineRoleArn": {
+      "Value": {
+        "Fn::GetAtt": "CodePipelineRole.Arn"
+      }
+    },
+    "CFNDeployRoleArn": {
+      "Value": {
+        "Fn::GetAtt": "CFNDeployRole.Arn"
+      }
+    },
+    "KMSKeyId": {
+      "Value": {
+        "Ref": "PipelineKMSKey"
+      },
+      "Description": "KMS Key ID for pipeline encryption"
+    },
+    "KMSKeyArn": {
+      "Value": {
+        "Fn::GetAtt": "PipelineKMSKey.Arn"
+      },
+      "Description": "KMS Key ARN for pipeline encryption"
+    }
+  }
+}
